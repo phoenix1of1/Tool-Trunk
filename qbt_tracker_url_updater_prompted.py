@@ -61,8 +61,16 @@ def prompt_yes_no(message: str, default_no: bool = True) -> bool:
 
 
 def get_connection_from_args(args: argparse.Namespace) -> QBConnection:
-    host = args.qbt_host or os.environ.get("QBT_HOST") or prompt_value("Enter the qBittorrent host", DEFAULT_QBT_HOST)
-    port = int(args.qbt_port or os.environ.get("QBT_PORT") or prompt_port("Enter the qBittorrent WebUI port", DEFAULT_QBT_PORT))
+    host = (
+        args.qbt_host
+        or os.environ.get("QBT_HOST")
+        or prompt_value("Enter the qBittorrent host or NAS/Docker hostname or IP", DEFAULT_QBT_HOST)
+    )
+    port = int(
+        args.qbt_port
+        or os.environ.get("QBT_PORT")
+        or prompt_port("Enter the qBittorrent WebUI port (use the mapped Docker/NAS port)", DEFAULT_QBT_PORT)
+    )
     username = args.qbt_username or os.environ.get("QBT_USERNAME") or prompt_value("Enter the qBittorrent username")
     password = args.qbt_password or os.environ.get("QBT_PASSWORD") or prompt_password("Enter the qBittorrent password")
 
@@ -127,8 +135,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
             "announce URL, and replace that tracker URL with a new one after showing a dry-run preview."
         )
     )
-    parser.add_argument("--qbt-host", dest="qbt_host", help="qBittorrent host (or env QBT_HOST)")
-    parser.add_argument("--qbt-port", dest="qbt_port", help="qBittorrent WebUI port (or env QBT_PORT)")
+    parser.add_argument("--qbt-host", dest="qbt_host", help="qBittorrent host, NAS hostname, or IP (or env QBT_HOST)")
+    parser.add_argument("--qbt-port", dest="qbt_port", help="qBittorrent WebUI port or mapped Docker/NAS port (or env QBT_PORT)")
     parser.add_argument("--qbt-username", dest="qbt_username", help="qBittorrent username (or env QBT_USERNAME)")
     parser.add_argument("--qbt-password", dest="qbt_password", help="qBittorrent password (or env QBT_PASSWORD)")
     parser.add_argument("--old-url", dest="old_url", help="Existing tracker announce URL to replace")
@@ -145,18 +153,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     conn = get_connection_from_args(args)
 
-    old_url = args.old_url or prompt_value("Enter the existing tracker announce URL")
-    new_url = args.new_url or prompt_value("Enter the new tracker announce URL")
-
-    if old_url == new_url:
-        print("The existing and new tracker URLs are the same. Nothing to change.")
-        return 1
-
     print(f"Connecting to qBittorrent at {conn.host}:{conn.port}...")
     try:
         qb = connect_qb(conn)
     except qbittorrentapi.LoginFailed as exc:
         print(f"Failed to log in to qBittorrent: {exc}")
+        return 1
+    except qbittorrentapi.APIConnectionError as exc:
+        print(
+            "Failed to connect to qBittorrent. "
+            "For Docker or NAS setups, make sure you are using the NAS hostname/IP and the exposed WebUI port."
+        )
+        print(f"Connection error: {exc}")
+        return 1
+
+    old_url = args.old_url or prompt_value("Enter the existing tracker announce URL")
+    new_url = args.new_url or prompt_value("Enter the new tracker announce URL")
+
+    if old_url == new_url:
+        print("The existing and new tracker URLs are the same. Nothing to change.")
         return 1
 
     preview_matches, _ = replace_tracker_urls(qb, old_url, new_url, dry_run=True)
